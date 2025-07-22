@@ -18,7 +18,7 @@ class GPUCoordinator:
         # Configuration - edit these defaults as needed
         self.vllm_service = 'vllm.service'
         self.check_interval = 3  # seconds between checks
-        self.grace_period = 8    # seconds before stopping vLLM
+        self.grace_period = 0    # seconds before stopping vLLM
         self.log_level = 'INFO'
         
         # Processes that need exclusive GPU access
@@ -53,18 +53,28 @@ class GPUCoordinator:
         try:
             cmdline = ' '.join(proc.cmdline())
             
-            # Check against known GPU-intensive process patterns
-            for pattern in self.gpu_intensive_processes:
-                if pattern in cmdline:
+            # Skip RDB web interface - it doesn't use GPU
+            if 'run_web.py' in cmdline or 'web' in cmdline:
+                return False
+            
+            # Check for RDB commands that actually need GPU
+            rdb_gpu_commands = ['rdb build', 'rdb search', 'python -m rdb']
+            if any(cmd in cmdline for cmd in rdb_gpu_commands):
+                print(f"DEBUG: MATCHED RDB GPU command in '{cmdline}'")
+                return True
+            
+            # Check for other GPU-intensive patterns (be more specific)
+            gpu_patterns = ['embedding', 'indexing', 'trainer', 'finetune']
+            for pattern in gpu_patterns:
+                # Only match if it's a clear GPU operation, not just containing the word
+                if (f' {pattern} ' in f' {cmdline} ' or 
+                    cmdline.startswith(pattern) or
+                    f'/{pattern}' in cmdline):
+                    print(f"DEBUG: MATCHED GPU pattern '{pattern}' in '{cmdline}'")
                     return True
             
-            # Check for specific command patterns
-            gpu_keywords = ['embed', 'index', 'build', 'train', 'finetune']
-            if any(keyword in cmdline.lower() for keyword in gpu_keywords):
-                return True
-                
             return False
-            
+                
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             return False
     
@@ -187,17 +197,4 @@ To customize settings, edit the defaults at the top of this script.
 
 if __name__ == "__main__":
     main()
-    echo ""
-    echo "REQUIRED: Install ML dependencies manually:"
-    echo ""
-    echo "Option 1 - Using pip (recommended):"
-    echo "  pip install --user faiss-cpu" 
-    echo ""
-    echo "Option 2 - Using conda (alternative):"
-    echo "  conda install -c conda-forge faiss-cpu"
-    echo ""
-    echo "Note: The faiss AUR package is currently broken (known issue)"
-    echo "Run 'rdb status' after installing dependencies to verify setup"
-    echo ""
-}
 
